@@ -21,7 +21,7 @@ pip install -r requirements.txt
 ```
 
 ## Inference
-Play around with your own image by the inference script.
+Play around it by the inference script. If you want to test your customized dataset, you should align the image to ensure the object is at the center of image, and also provide the corresponding object mask. The object mask can be obtained by [image-matting-app](https://huggingface.co/spaces/SankarSrin/image-matting-app), or other image matting methods.
 ```shell
 sh inferece_local_control.sh
 ```
