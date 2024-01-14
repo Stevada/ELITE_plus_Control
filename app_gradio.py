@@ -64,7 +64,7 @@ def process(
 class Model:
     def __init__(
         self,
-        pretrained_model_name_or_path: str = "CompVis/stable-diffusion-v1-4",
+        pretrained_model_name_or_path: str = "runwayml/stable-diffusion-v1-5",
         global_mapper_path: str = "./checkpoints/global_mapper.pt",
         local_mapper_path: str = "./checkpoints/local_mapper.pt",
     ):
@@ -176,10 +176,7 @@ class Model:
 
     def run(
         self,
-        image: dict[
-            str,
-            PIL.Image.Image,
-        ],
+        image: dict,
         text: str,
         seed: int,
         guidance_scale: float,
@@ -187,8 +184,8 @@ class Model:
         num_steps: int,
     ):
         example = self.prepare_data(
-            image["image"],
-            image["mask"],
+            image["background"],
+            image["layers"][0],
             text,
         )
 
@@ -212,6 +209,7 @@ class Model:
             seed=seed,
             llambda=float(lambda_),
             num_steps=num_steps,
+            add_control=False，
         )
         return image[0]
 
@@ -233,10 +231,9 @@ def create_demo():
         gr.Markdown(USAGE)
         with gr.Row():
             with gr.Column():
-                with gr.Box():
-                    image = gr.Image(
+                with gr.Group():
+                    image = gr.ImageMask(
                         label="Input",
-                        tool="sketch",
                         type="pil",
                     )
                     # gr.Markdown('Draw a mask on your object.')
@@ -317,4 +314,4 @@ def create_demo():
 
 if __name__ == "__main__":
     demo = create_demo()
-    demo.queue(api_open=False).launch()
+    demo.queue(api_open=False).launch(debug=True, show_error=True)
