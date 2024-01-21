@@ -32,7 +32,6 @@ class CrossAttentionIPAdapter(CrossAttention):
         dropout=0.0,
         lam=1,
         num_tokens=4,
-        ctrl_scale=1.0,
         *args,
         **kwargs
     ):
@@ -50,7 +49,6 @@ class CrossAttentionIPAdapter(CrossAttention):
         self.heads = heads
         self.lam = lam
         self.num_tokens = num_tokens
-        self.ctrl_scale = ctrl_scale
 
         # Here are the weights for q, k ,v
         self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
@@ -70,9 +68,11 @@ class CrossAttentionIPAdapter(CrossAttention):
 
         q = self.to_q(x)
         # TODO: how is it possible that self-attention is supported here?
+        # print(f"context: {context.shape}, x: {x.shape}")
         context = default(context, x)
         k = self.to_k_ip(context)
         v = self.to_v_ip(context)
+        # print(f"q: {q.shape}, k: {k.shape}, v: {v.shape}")
 
         # q, k, v = map(lambda t: rearrange(t, "b n (h d) -> (b h) n d", h=h), (q, k, v))
 
@@ -166,8 +166,11 @@ class CrossAttentionIPAdapter(CrossAttention):
 
             # get output from ip adapter
             ip_adapter_context = context["CTRL_EMB"] if "CTRL_EMB" in context else None
+            ctrl_scale = context["CTRL_SCALE"] if "CTRL_SCALE" in context else 1.0
             if ip_adapter_context is not None:
-                hidden_states += self.ctrl_scale * self.compute_ip_attn(hidden_states_ipadapter, ip_adapter_context, attention_mask)
+                if len(ip_adapter_context.shape) == 4:
+                    ip_adapter_context = ip_adapter_context.view(ip_adapter_context.shape[0], ip_adapter_context.shape[2], ip_adapter_context.shape[3])
+                hidden_states += ctrl_scale * self.compute_ip_attn(hidden_states_ipadapter, ip_adapter_context, attention_mask)
 
             hidden_states = self.reshape_batch_dim_to_heads(hidden_states)
             # linear proj

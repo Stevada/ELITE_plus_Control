@@ -11,7 +11,7 @@ with gr.Blocks() as demo:
     im = gr.ImageMask(
         label="Input",
         type="pil",
-        crop_size="1:1",
+        # crop_size="1:1",
     )
 
     with gr.Group():

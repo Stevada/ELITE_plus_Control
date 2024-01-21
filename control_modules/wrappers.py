@@ -88,7 +88,7 @@ class IPAdapterWrapper:
                     "to_v_ip.weight": ipadapter_sd[f"{i*2+1}.to_v_ip.weight"],
                 }
                 i += 1
-                attn_layers[name] = CrossAttentionIPAdapter(query_dim, inner_dim, context_dim=context_dim, heads=heads, dim_head=dim_head, dropout=dropout, ctrl_scale=self.ctrl_scale)
+                attn_layers[name] = CrossAttentionIPAdapter(query_dim, inner_dim, context_dim=context_dim, heads=heads, dim_head=dim_head, dropout=dropout)
                 attn_layers[name].load_state_dict(weights)
         self.set_attn2_layers(attn_layers) 
     
@@ -128,7 +128,7 @@ class IPAdapterWrapper:
     def __call__(self,
         sample: torch.FloatTensor,
         timestep: Union[torch.Tensor, float, int],
-        encoder_hidden_states: torch.Tensor,
+        encoder_hidden_states: Union[torch.Tensor, dict],
         class_labels: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         return_dict: bool = True,) -> Any:

@@ -77,6 +77,7 @@ def pww_load_tools(
         "openai/clip-vit-large-patch14",
         torch_dtype=torch.float16,
     )
+
     text_encoder = CLIPTextModel.from_pretrained(
         "openai/clip-vit-large-patch14",
         torch_dtype=torch.float16,
@@ -105,12 +106,11 @@ def pww_load_tools(
         args = kwargs["args"]
     except KeyError:
         raise KeyError("args is not fed in!!")
-    control_type = args.control_type
-    if control_type:
-        wrapper = wrapper_dict[control_type]
+    if args.control_type:
+        wrapper = wrapper_dict[args.control_type]
         unet = wrapper(unet, args=args)
     else:
-        raise ValueError(f"Unknown control type: {control_type}! Supported control types: {wrapper_dict.keys()}.")
+        raise ValueError(f"Unknown control type: {args.control_type}! Supported control types: {wrapper_dict.keys()}.")
 
     mapper = Mapper(
         input_dim=1024,
@@ -365,7 +365,7 @@ def parse_args():
     parser.add_argument(
         "--add_control",
         type=bool,
-        default=True,
+        default=False,
         help="Add control module.",
     )
 
@@ -414,7 +414,6 @@ if __name__ == "__main__":
         diffusion_model_path=args.pretrained_model_name_or_path,
         mapper_model_path=args.global_mapper_path,
         mapper_local_model_path=args.local_mapper_path,
-        control_type=args.control_type,
         args=args,
     )
 
@@ -443,11 +442,15 @@ if __name__ == "__main__":
         batch["pixel_values_seg"] = batch["pixel_values_seg"].to("cuda:0").half()
         batch["input_ids"] = batch["input_ids"].to("cuda:0")
         batch["index"] = batch["index"].to("cuda:0").long()
-        batch["ctrl_img_path"] = [args.ctrl_img_path] if args.ctrl_img_path else batch["img_path"]
         print(
             step,
             batch["text"],
         )
+        ctrl_emb = None
+        if args.add_control:
+            ctrl_img =  Image.open(args.ctrl_img_path)
+            ctrl_emb, _ = unet.get_ctrl_embeds(ctrl_img)
+        batch["ctrl_emb"] = ctrl_emb
         syn_images = validation(
             batch,
             tokenizer,
@@ -461,6 +464,7 @@ if __name__ == "__main__":
             5,
             seed=args.seed,
             llambda=float(args.llambda),
+            ctrl_scale=args.ctrl_scale,
             add_control=args.add_control,
         )
         concat = np.concatenate(

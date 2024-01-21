@@ -11,7 +11,8 @@ import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
 
-from inference_local import pww_load_tools, validation
+# from inference_local import pww_load_tools, validation
+from inference_local_control import pww_load_tools, validation, parse_args
 from train_local import LMSDiscreteScheduler
 
 
@@ -64,11 +65,10 @@ def process(
 class Model:
     def __init__(
         self,
-        pretrained_model_name_or_path: str = "runwayml/stable-diffusion-v1-5",
-        global_mapper_path: str = "./checkpoints/global_mapper.pt",
-        local_mapper_path: str = "./checkpoints/local_mapper.pt",
+        **kwargs,
     ):
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        args = kwargs["args"]
         (
             self.vae,
             self.unet,
@@ -81,17 +81,20 @@ class Model:
         ) = pww_load_tools(
             self.device,
             LMSDiscreteScheduler,
-            diffusion_model_path=pretrained_model_name_or_path,
-            mapper_model_path=global_mapper_path,
-            mapper_local_model_path=local_mapper_path,
+            diffusion_model_path=args.pretrained_model_name_or_path,
+            mapper_model_path=args.global_mapper_path,
+            mapper_local_model_path=args.local_mapper_path,
+            args=args
         )
 
     def prepare_data(
         self,
         image: PIL.Image.Image,
         mask: PIL.Image.Image,
+        ctrl_img: PIL.Image.Image,
         text: str,
         placeholder_string: str = "S",
+        add_control: bool = False,
     ) -> dict[str, Any,]:
         data: dict[
             str,
@@ -161,6 +164,10 @@ class Model:
         data["pixel_values_seg"] = data["pixel_values_seg"].to(device).half()
         data["input_ids"] = data["input_ids"].to(device)
         data["index"] = data["index"].to(device).long()
+        ctrl_emb = None
+        if add_control:
+            ctrl_emb, _ = self.unet.get_ctrl_embeds(ctrl_img)
+        data["ctrl_emb"] = ctrl_emb
 
         for (
             key,
@@ -177,16 +184,24 @@ class Model:
     def run(
         self,
         image: dict,
+        ctrl_img: PIL.Image.Image,
+        add_control: bool,
         text: str,
         seed: int,
         guidance_scale: float,
         lambda_: float,
         num_steps: int,
+        ctrl_scale: float,
     ):
+        object_img = image["background"]
+        mask = image["layers"][0]
+
         example = self.prepare_data(
-            image["background"],
-            image["layers"][0],
-            text,
+            image=object_img,
+            mask=mask,
+            ctrl_img=ctrl_img,
+            text=text,
+            add_control=add_control
         )
 
         if seed == -1:
@@ -195,7 +210,7 @@ class Model:
                 1000000,
             )
 
-        image = validation(
+        results = validation(
             example,
             self.tokenizer,
             self.image_encoder,
@@ -207,11 +222,12 @@ class Model:
             example["pixel_values_clip"].device,
             guidance_scale,
             seed=seed,
+            ctrl_scale=float(ctrl_scale),
             llambda=float(lambda_),
             num_steps=num_steps,
-            add_control=False，
+            add_control=add_control,
         )
-        return image[0]
+        return results[0]
 
 
 def create_demo():
@@ -223,8 +239,8 @@ def create_demo():
     3. Input proper text prompts, such as "A photo of S" or "A S wearing sunglasses", where "S" denotes your customized concept.
     4. Click the Run button. You can also adjust the hyperparameters to improve the results.
     """
-
-    model = Model()
+    args = parse_args()
+    model = Model(args=args)
 
     with gr.Blocks() as demo:
         gr.Markdown(TITLE)
@@ -232,14 +248,44 @@ def create_demo():
         with gr.Row():
             with gr.Column():
                 with gr.Group():
-                    image = gr.ImageMask(
-                        label="Input",
-                        type="pil",
-                    )
                     # gr.Markdown('Draw a mask on your object.')
                     gr.Markdown(
                         "Upload your image and **draw a mask on the object part.** Like [this](https://user-images.githubusercontent.com/23421814/224873479-c4cf44d6-8c99-4ef9-b972-87c25fe923ee.png)."
                     )
+                    image = gr.ImageMask(
+                        label="Input",
+                        type="pil",
+                    )
+                    # gr.ImageMask dosen't work well with the gr.Examples.
+                    # input_imgs_paths = sorted([path.as_posix() for path in pathlib.Path("./assets/input_images").glob("*")])
+                    # input_img_exmps = gr.Examples(
+                    #     examples=input_imgs_paths,
+                    #     inputs=image,
+                    # )
+                with gr.Accordion(label="Add control image", open=False):
+                    gr.Markdown(
+                        "Upload your control image."
+                    )
+                    ctrl_img = gr.Image(
+                        label="Control image",
+                        type="pil",
+                    )
+                    add_control = gr.Checkbox(label="Apply", info="Do you want to apply the control image?")
+                    ctrl_scale= gr.Slider(
+                        label="Control scale",
+                        minimum=0,
+                        maximum=1.0,
+                        step=0.1,
+                        value=0.7,
+                        info="The larger the control scale, the influence of the control image is larger.",
+                    )
+                    # gr.ImageMask dosen't work well with the gr.Examples.
+                    # ctrl_imgs_paths = sorted([path.as_posix() for path in pathlib.Path("./assets/ctrl_images").glob("*")])
+                    # ctrl_img_exmps = gr.Examples(
+                    #     examples=ctrl_imgs_paths,
+                    #     inputs=ctrl_img,
+                    # )
+
                 prompt = gr.Text(
                     label="Prompt",
                     placeholder='e.g. "A photo of S", "A S wearing sunglasses"',
@@ -253,6 +299,7 @@ def create_demo():
                     value=0.6,
                     info="The larger the lambda, the more consistency between the generated image and the input image, but less editability.",
                 )
+                
                 run_button = gr.Button("Run")
                 with gr.Accordion(
                     label="Advanced options",
@@ -278,32 +325,24 @@ def create_demo():
                         minimum=1,
                         maximum=300,
                         step=1,
-                        value=100,
+                        value=50,
                         info="In the paper, the number of steps is set to 100, but in this demo the default value is 20 to reduce inference time.",
                     )
             with gr.Column():
                 result = gr.Image(label="Result")
 
-        paths = sorted([path.as_posix() for path in pathlib.Path("./test_datasets").glob("*") if "bg" not in path.stem])
-        gr.Examples(
-            examples=paths,
-            inputs=image,
-            examples_per_page=20,
-        )
-
         inputs = [
             image,
+            ctrl_img,
+            add_control,
             prompt,
             seed,
             guidance_scale,
             lambda_,
             num_steps,
+            ctrl_scale,
         ]
-        prompt.submit(
-            fn=model.run,
-            inputs=inputs,
-            outputs=result,
-        )
+        
         run_button.click(
             fn=model.run,
             inputs=inputs,

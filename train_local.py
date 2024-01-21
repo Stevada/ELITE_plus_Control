@@ -520,9 +520,10 @@ def validation(
     vae,
     device,
     guidance_scale,
-    seed=None,
+    seed=-1,
     llambda=1,
     num_steps=100,
+    ctrl_scale=0.7,
     **kwargs,
 ):
     scheduler = LMSDiscreteScheduler(
@@ -642,10 +643,7 @@ def validation(
     )
     inj_embedding_local = inj_embedding_local * mask
     
-    ctrl_emb = None
-    if kwargs["add_control"]:
-        ctrl_img =  Image.open(example["ctrl_img_path"][0])
-        ctrl_emb, _ = unet.get_ctrl_embeds(ctrl_img)
+    ctrl_emb = example["ctrl_emb"]
     for t in tqdm(scheduler.timesteps):
         latent_model_input = scheduler.scale_model_input(
             latents,
@@ -660,6 +658,7 @@ def validation(
                     "LOCAL": inj_embedding_local,
                     "LOCAL_INDEX": placeholder_idx.detach(),
                     "LAMBDA": llambda,
+                    "CTRL_SCALE": ctrl_scale,
                     "CTRL_EMB": ctrl_emb,
                 },
             ).sample
